@@ -66,21 +66,83 @@ type (
 		Lat float64 `json:"lat"`
 		Lng float64 `json:"lng"`
 	}
+
+	GeocoderError struct {
+		Status string `json:"status"`
+	}
 )
+
+func (g GeocoderError) Error() string {
+	return fmt.Sprintf("Geocoder service error!  (%s)", g.Status)
+}
 
 func (a *Address) String() string {
 	return fmt.Sprintf("%s (lat: %3.7f, lng: %3.7f)", a.Address, a.Lat, a.Lng)
 }
 
 func Geocode(q string) (*Address, error) {
-	return fetch("https://maps.googleapis.com/maps/api/geocode/json?sensor=false&address=" + url.QueryEscape(strings.TrimSpace(q)))
+	return GeocodeAuthenticated(q, "")
 }
+
 func ReverseGeocode(ll string) (*Address, error) {
-	return fetch("https://maps.googleapis.com/maps/api/geocode/json?sensor=false&latlng=" + url.QueryEscape(strings.TrimSpace(ll)))
+	return ReverseGeocodeAuthenticated(ll, "")
+}
+
+func GeocodeAuthenticated(q string, apiKey string) (*Address, error) {
+	return GeocodeAuthenticatedWithComponents(q, ComponentFilter{}, apiKey)
+}
+
+type ComponentFilter struct {
+	AdministrativeArea string
+	Country            string
+	Locality           string
+	PostalCode         string
+	Route              string
+}
+
+func (c *ComponentFilter) String() string {
+	parts := []string{}
+	if c.AdministrativeArea != "" {
+		parts = append(parts, "administrative_area:"+url.QueryEscape(c.AdministrativeArea))
+	}
+	if c.Country != "" {
+		parts = append(parts, "country:"+url.QueryEscape(c.Country))
+	}
+	if c.Locality != "" {
+		parts = append(parts, "locality:"+url.QueryEscape(c.Locality))
+	}
+	if c.PostalCode != "" {
+		parts = append(parts, "postal_code:"+url.QueryEscape(c.PostalCode))
+	}
+	if c.Route != "" {
+		parts = append(parts, "route:"+url.QueryEscape(c.Route))
+	}
+	return strings.Join(parts, "|")
+}
+
+func GeocodeAuthenticatedWithComponents(q string, components ComponentFilter, apiKey string) (*Address, error) {
+	if apiKey != "" {
+		apiKey = "&key=" + url.QueryEscape(strings.TrimSpace(apiKey))
+	}
+	if q != "" {
+		q = "&address=" + url.QueryEscape(strings.TrimSpace(q))
+	}
+	componentsStr := components.String()
+	if componentsStr != "" {
+		componentsStr = "&components=" + componentsStr
+	}
+	return fetch("https://maps.googleapis.com/maps/api/geocode/json?sensor=false" + apiKey + q + componentsStr)
+}
+
+func ReverseGeocodeAuthenticated(ll string, apiKey string) (*Address, error) {
+	if apiKey != "" {
+		apiKey = "&key=" + url.QueryEscape(strings.TrimSpace(apiKey))
+	}
+	latLng := "&latlng=" + url.QueryEscape(strings.TrimSpace(ll))
+	return fetch("https://maps.googleapis.com/maps/api/geocode/json?sensor=false" + latLng + apiKey)
 }
 
 func fetch(url string) (*Address, error) {
-
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, RemoteServerError
@@ -96,7 +158,7 @@ func fetch(url string) (*Address, error) {
 	}
 
 	if g.Status != StatusOk {
-		return nil, fmt.Errorf("Geocoder service error!  (%s)", g.Status)
+		return nil, &GeocoderError{Status: g.Status}
 	}
 
 	return &Address{
